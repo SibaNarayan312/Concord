@@ -745,6 +745,38 @@ label {
   background: rgba(244, 63, 94, 0.04);
 }
 
+.stream-event-item.event-WOOCOMMERCE_ORDER_RESERVED {
+  border-left-color: #9333ea;
+  background: rgba(147, 51, 234, 0.06);
+}
+
+.stream-event-item.event-WOOCOMMERCE_ORDER_CONFIRMED {
+  border-left-color: var(--accent-emerald);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.stream-event-item.event-WOOCOMMERCE_ORDER_CANCELLED {
+  border-left-color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.stream-event-item.event-WOOCOMMERCE_STOCK_SYNCED {
+  border-left-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.06);
+}
+
+.stream-event-item.event-WOOCOMMERCE_OVERSELL_ALERT {
+  border-left-color: var(--accent-rose);
+  background: rgba(244, 63, 94, 0.15);
+  animation: pulseAlert 1.5s infinite;
+}
+
+@keyframes pulseAlert {
+  0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+}
+
 .event-time {
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -763,7 +795,21 @@ label {
 .badge-HOLD_EXPIRED { background: rgba(139, 92, 246, 0.2); color: var(--accent-purple); }
 .badge-HOLD_CANCELLED { background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); }
 .badge-RESERVATION_REJECTED { background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); }
+.badge-WOOCOMMERCE_ORDER_RESERVED { background: rgba(147, 51, 234, 0.25); color: #c084fc; }
+.badge-WOOCOMMERCE_ORDER_CONFIRMED { background: rgba(16, 185, 129, 0.25); color: #34d399; }
+.badge-WOOCOMMERCE_ORDER_CANCELLED { background: rgba(245, 158, 11, 0.25); color: #fbbf24; }
+.badge-WOOCOMMERCE_STOCK_SYNCED { background: rgba(6, 182, 212, 0.25); color: #38bdf8; }
+.badge-WOOCOMMERCE_OVERSELL_ALERT { background: rgba(244, 63, 94, 0.3); color: #fda4af; }
 .badge-info { background: rgba(255, 255, 255, 0.1); color: var(--text-muted); }
+.badge-replay {
+  font-size: 0.65rem;
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  margin-right: 0.3rem;
+}
 
 .event-summary {
   flex: 1;

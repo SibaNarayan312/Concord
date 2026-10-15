@@ -1,0 +1,102 @@
+# ==============================================================================
+# Concord — Production Docker Compose Configuration
+# High-Contention Inventory Reservation Service with WooCommerce Integration
+# ==============================================================================
+# Security Notice:
+# - MongoDB and Redis are placed on an isolated private internal network.
+# - Neither Redis nor MongoDB ports are exposed to host or the public internet.
+# - Only the Concord FastAPI application container publishes port 8000.
+# ==============================================================================
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: concord_prod_mongodb
+    restart: always
+    environment:
+      - MONGO_INITDB_DATABASE=${MONGO_DB_NAME:-concord}
+    volumes:
+      - mongo_prod_data:/data/db
+    networks:
+      - concord_internal
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: concord_prod_redis
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - concord_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: concord_prod_backend
+    restart: always
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=production
+      - PROJECT_NAME=Concord Inventory Reservation Service
+      - MONGO_URI=mongodb://mongodb:27017
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-concord}
+      - REDIS_URI=redis://redis:6379/0
+      - DEFAULT_HOLD_TTL_SECONDS=${DEFAULT_HOLD_TTL_SECONDS:-30}
+      - EXPIRATION_WORKER_INTERVAL_SECONDS=${EXPIRATION_WORKER_INTERVAL_SECONDS:-2}
+      - RECONCILIATION_WORKER_INTERVAL_SECONDS=${RECONCILIATION_WORKER_INTERVAL_SECONDS:-5}
+      - MAX_RESERVATION_QUANTITY=${MAX_RESERVATION_QUANTITY:-100}
+      - STREAM_MAX_LEN=${STREAM_MAX_LEN:-10000}
+      - WC_STORE_URL=${WC_STORE_URL}
+      - WC_CONSUMER_KEY=${WC_CONSUMER_KEY}
+      - WC_CONSUMER_SECRET=${WC_CONSUMER_SECRET}
+      - WC_WEBHOOK_SECRET=${WC_WEBHOOK_SECRET}
+      - WC_HOLD_TTL_SECONDS=${WC_HOLD_TTL_SECONDS:-900}
+      - WC_STOCK_SYNC_ENABLED=${WC_STOCK_SYNC_ENABLED:-true}
+      - WC_VERIFY_WEBHOOK_SIGNATURE=${WC_VERIFY_WEBHOOK_SIGNATURE:-true}
+      - WC_MOCK_MODE=${WC_MOCK_MODE:-false}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - concord_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  concord_internal:
+    driver: bridge
+    internal: false
+
+volumes:
+  mongo_prod_data:
+    driver: local
+  redis_prod_data:
+    driver: local

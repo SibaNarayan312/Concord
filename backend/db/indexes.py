@@ -68,6 +68,55 @@ INDEX_DEFINITIONS = {
             "name": "idx_operations_booking_id",
             "justification": "Allows immediate lookup of operation history and retry attempt counts for any booking."
         }
+    ],
+    "woocommerce_mappings": [
+        {
+            "keys": [("wc_product_id", pymongo.ASCENDING), ("wc_variation_id", pymongo.ASCENDING)],
+            "unique": True,
+            "name": "idx_wc_mappings_product_variation_unique",
+            "justification": "Guarantees exactly one authoritative mapping between a WooCommerce product/variation and a Concord product."
+        },
+        {
+            "keys": [("concord_product_id", pymongo.ASCENDING)],
+            "unique": False,
+            "name": "idx_wc_mappings_concord_product",
+            "justification": "Enables instant reverse lookup of store mappings when Concord inventory changes."
+        }
+    ],
+    "woocommerce_orders": [
+        {
+            "keys": [("order_id", pymongo.ASCENDING)],
+            "unique": True,
+            "name": "idx_wc_orders_order_id_unique",
+            "justification": "Enforces single tracking record per WooCommerce order to prevent duplicate processing."
+        },
+        {
+            "keys": [("booking_ids", pymongo.ASCENDING)],
+            "unique": False,
+            "name": "idx_wc_orders_booking_ids",
+            "justification": "Accelerates lookup of WooCommerce orders associated with specific Concord booking IDs."
+        },
+        {
+            "keys": [("status", pymongo.ASCENDING), ("created_at", pymongo.DESCENDING)],
+            "unique": False,
+            "name": "idx_wc_orders_status_created",
+            "justification": "Facilitates filtering and reconciliation queries across order statuses."
+        }
+    ],
+    "woocommerce_webhooks": [
+        {
+            "keys": [("delivery_id", pymongo.ASCENDING)],
+            "unique": True,
+            "sparse": True,
+            "name": "idx_wc_webhooks_delivery_id_unique",
+            "justification": "Deduplicates webhook deliveries from WooCommerce to prevent re-processing identical webhook events."
+        },
+        {
+            "keys": [("created_at", pymongo.DESCENDING)],
+            "unique": False,
+            "name": "idx_wc_webhooks_created_desc",
+            "justification": "Provides chronological ordering for the WooCommerce webhook audit log."
+        }
     ]
 }
 

@@ -36,6 +36,10 @@
           <span class="status-dot"></span>
           <span class="status-label">Redis: <strong id="redis-status-text">Checking...</strong></span>
         </div>
+        <div class="status-chip" id="wc-status-chip">
+          <span class="status-dot"></span>
+          <span class="status-label">WooCommerce: <strong id="wc-status-text">Checking...</strong></span>
+        </div>
         <div class="status-chip live-chip" id="sse-status-chip">
           <span class="pulse-dot"></span>
           <span class="status-label">Stream: <strong id="sse-status-text">Connecting...</strong></span>
@@ -240,6 +244,7 @@
             <button class="tab-btn active" data-tab="tab-status">Bookings by Status ($group)</button>
             <button class="tab-btn" data-tab="tab-perf">Product Performance ($lookup)</button>
             <button class="tab-btn" data-tab="tab-indexes">MongoDB Indexes</button>
+            <button class="tab-btn" data-tab="tab-woocommerce">WooCommerce Store</button>
           </div>
 
           <div class="tab-contents">
@@ -278,6 +283,55 @@
             <div class="tab-content" id="tab-indexes">
               <div id="index-list-container" class="index-inspect-list">
                 Loading index metadata...
+              </div>
+            </div>
+
+            <div class="tab-content" id="tab-woocommerce">
+              <div class="wc-panel-wrapper" style="padding: 0.5rem 0;">
+                <div class="wc-banner" style="display: flex; justify-content: space-between; align-items: center; background: rgba(147, 51, 234, 0.08); border: 1px solid rgba(147, 51, 234, 0.25); border-radius: var(--radius-md); padding: 0.75rem 1rem; margin-bottom: 0.85rem;">
+                  <div>
+                    <strong style="color: #c084fc; font-size: 0.85rem;">WooCommerce Store Integration</strong>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);" id="wc-store-status-text">Checking store status...</div>
+                  </div>
+                  <div style="display: flex; gap: 0.4rem;">
+                    <button class="btn btn-secondary btn-xs" id="btn-wc-auto-map" title="Auto-map existing products to WooCommerce IDs">Auto-Map Demo Items</button>
+                    <button class="btn btn-secondary btn-xs" id="btn-wc-sync-all" title="Push live Concord stock to WooCommerce">Sync All Stock</button>
+                    <button class="btn btn-primary btn-xs" id="btn-wc-simulate" title="Simulate a customer purchase flow in WooCommerce">Simulate WC Purchase</button>
+                  </div>
+                </div>
+
+                <h4 style="font-size: 0.8rem; margin: 0.6rem 0 0.4rem; color: var(--text-muted); text-transform: uppercase;">Active Store Mappings</h4>
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>WC Product ID</th>
+                      <th>Concord Product</th>
+                      <th>Live Stock</th>
+                      <th>Last Synced</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbl-wc-mappings">
+                    <tr><td colspan="5" class="text-subtle text-center">Loading mappings...</td></tr>
+                  </tbody>
+                </table>
+
+                <h4 style="font-size: 0.8rem; margin: 1rem 0 0.4rem; color: var(--text-muted); text-transform: uppercase;">Recent WooCommerce Webhook Orders</h4>
+                <div class="table-scroll-container" style="max-height: 180px;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>WC Order ID</th>
+                        <th>Order Status</th>
+                        <th>Concord Booking</th>
+                        <th>Updated At</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tbl-wc-orders">
+                      <tr><td colspan="4" class="text-subtle text-center">No orders tracked yet.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

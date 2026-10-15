@@ -82,3 +82,12 @@ def get_idempotency_collection():
 
 def get_operations_collection():
     return get_db()["reservation_operations"]
+
+def get_wc_mappings_collection():
+    return get_db()["woocommerce_mappings"]
+
+def get_wc_orders_collection():
+    return get_db()["woocommerce_orders"]
+
+def get_wc_webhooks_collection():
+    return get_db()["woocommerce_webhooks"]

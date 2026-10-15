@@ -26,4 +26,14 @@ class Settings(BaseSettings):
     STREAM_MAX_LEN: int = int(os.getenv("STREAM_MAX_LEN", "10000"))
     STREAM_KEY: str = "concord:events"
 
+    # WooCommerce Integration
+    WC_STORE_URL: str = os.getenv("WC_STORE_URL", "")
+    WC_CONSUMER_KEY: str = os.getenv("WC_CONSUMER_KEY", "")
+    WC_CONSUMER_SECRET: str = os.getenv("WC_CONSUMER_SECRET", "")
+    WC_WEBHOOK_SECRET: str = os.getenv("WC_WEBHOOK_SECRET", "")
+    WC_HOLD_TTL_SECONDS: int = int(os.getenv("WC_HOLD_TTL_SECONDS", "900"))
+    WC_STOCK_SYNC_ENABLED: bool = os.getenv("WC_STOCK_SYNC_ENABLED", "true").lower() in ("true", "1", "yes")
+    WC_VERIFY_WEBHOOK_SIGNATURE: bool = os.getenv("WC_VERIFY_WEBHOOK_SIGNATURE", "true").lower() in ("true", "1", "yes")
+    WC_MOCK_MODE: bool = os.getenv("WC_MOCK_MODE", "true").lower() in ("true", "1", "yes")
+
 settings = Settings()

@@ -93,3 +93,50 @@ class StreamEvent(BaseModel):
     timestamp: str
     outcome: str
     data: Dict[str, Any] = {}
+
+class WooCommerceMappingCreate(BaseModel):
+    concord_product_id: str = Field(..., description="Target Concord product UUID")
+    wc_product_id: int = Field(..., ge=1, description="WooCommerce Product ID")
+    wc_variation_id: int = Field(0, ge=0, description="Optional WooCommerce Variation ID (0 for simple product)")
+    sku: Optional[str] = Field(None, max_length=64, description="Optional product SKU")
+    sync_enabled: bool = Field(True, description="Whether stock sync is active for this product")
+
+class WooCommerceMappingResponse(BaseModel):
+    id: str
+    concord_product_id: str
+    concord_product_name: Optional[str] = None
+    wc_product_id: int
+    wc_variation_id: int = 0
+    sku: Optional[str] = None
+    sync_enabled: bool = True
+    concord_available_stock: Optional[int] = None
+    last_synced_stock: Optional[int] = None
+    last_synced_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class WooCommerceSyncResult(BaseModel):
+    wc_product_id: int
+    wc_variation_id: int = 0
+    concord_product_id: str
+    stock_quantity: int
+    success: bool
+    message: str
+    mode: str
+
+class WooCommerceStatusResponse(BaseModel):
+    store_url: str
+    connected: bool
+    mock_mode: bool
+    stock_sync_enabled: bool
+    verify_signatures: bool
+    total_mappings: int
+    total_tracked_orders: int
+    recent_webhooks_count: int
+
+class WooCommerceOrderSimulation(BaseModel):
+    wc_product_id: int = Field(..., description="WooCommerce product ID to simulate purchase for")
+    wc_variation_id: int = Field(0, description="Optional variation ID")
+    quantity: int = Field(1, ge=1, le=100, description="Quantity to purchase")
+    auto_complete_payment: bool = Field(True, description="Whether to simulate payment confirmation immediately")
+    customer_email: Optional[str] = Field("shopper@example.com", description="Simulated customer email")

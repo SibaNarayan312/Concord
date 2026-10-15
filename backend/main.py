@@ -11,7 +11,7 @@ from backend.config import settings
 from backend.db.mongo import connect_mongo, close_mongo, get_db
 from backend.db.redis_client import connect_redis, close_redis
 from backend.db.indexes import ensure_indexes
-from backend.routes import health, products, reservations, bookings, analytics, events
+from backend.routes import health, products, reservations, bookings, analytics, events, woocommerce
 from backend.workers.expiration_worker import run_expiration_worker
 from backend.workers.reconciliation_worker import run_reconciliation_worker
 
@@ -68,6 +68,7 @@ app.include_router(reservations.router)
 app.include_router(bookings.router)
 app.include_router(analytics.router)
 app.include_router(events.router)
+app.include_router(woocommerce.router)
 
 # Serve Frontend static assets
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))

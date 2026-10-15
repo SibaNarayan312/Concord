@@ -28,6 +28,8 @@ ENV/
 
 # Environment files
 .env
+.env.production
+.env*.local
 
 # Testing & Cache
 .pytest_cache/

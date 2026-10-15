@@ -58,6 +58,34 @@ async function checkHealth() {
       redisChip.className = 'status-chip down';
       redisText.innerText = 'Down';
     }
+
+    // WooCommerce Status
+    try {
+      const wcRes = await fetch('/woocommerce/status');
+      if (wcRes.ok) {
+        const wcData = await wcRes.json();
+        const wcChip = document.getElementById('wc-status-chip');
+        const wcText = document.getElementById('wc-status-text');
+        if (wcChip && wcText) {
+          if (wcData.connected) {
+            wcChip.className = 'status-chip up';
+            wcText.innerText = 'Live Store';
+          } else if (wcData.mock_mode) {
+            wcChip.className = 'status-chip up';
+            wcText.innerText = 'Mock/Test';
+          } else {
+            wcChip.className = 'status-chip down';
+            wcText.innerText = 'Offline';
+          }
+        }
+        const storeBanner = document.getElementById('wc-store-status-text');
+        if (storeBanner) {
+          storeBanner.innerText = `Store: ${wcData.store_url} | Mode: ${wcData.mock_mode ? 'Mock Mode' : 'Live Store'} | Mappings: ${wcData.total_mappings}`;
+        }
+      }
+    } catch (e) {
+      console.warn('WooCommerce status check failed', e);
+    }
   } catch (err) {
     console.error('Health check failed', err);
   }
@@ -246,6 +274,8 @@ async function loadRecentBookings() {
   }
 }
 
+let isHistoricalReplay = false;
+
 // 5. Connect SSE Contention Stream
 function connectStream(replay = true) {
   if (eventSource) {
@@ -256,6 +286,11 @@ function connectStream(replay = true) {
   const sseText = document.getElementById('sse-status-text');
   sseChip.className = 'status-chip live-chip';
   sseText.innerText = 'Connecting...';
+
+  isHistoricalReplay = replay;
+  setTimeout(() => {
+    isHistoricalReplay = false;
+  }, 1500);
 
   const url = `/events/stream?replay=${replay}`;
   eventSource = new EventSource(url);
@@ -275,7 +310,7 @@ function connectStream(replay = true) {
   eventSource.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
-      appendStreamEvent(e.type || 'LIFECYCLE', data);
+      appendStreamEvent(e.type || 'LIFECYCLE', data, isHistoricalReplay);
     } catch (err) {
       console.warn('Failed to parse SSE payload', err);
     }
@@ -287,18 +322,25 @@ function connectStream(replay = true) {
     'BOOKING_CONFIRMED',
     'HOLD_EXPIRED',
     'HOLD_CANCELLED',
-    'RESERVATION_REJECTED'
+    'RESERVATION_REJECTED',
+    'WOOCOMMERCE_ORDER_RESERVED',
+    'WOOCOMMERCE_ORDER_CONFIRMED',
+    'WOOCOMMERCE_ORDER_CANCELLED',
+    'WOOCOMMERCE_RESERVATION_REJECTED',
+    'WOOCOMMERCE_STOCK_SYNCED',
+    'WOOCOMMERCE_OVERSELL_ALERT'
   ];
 
   eventTypes.forEach(type => {
     eventSource.addEventListener(type, (e) => {
       try {
         const data = JSON.parse(e.data);
-        appendStreamEvent(type, data);
-        // Refresh products and metrics on live events
+        appendStreamEvent(type, data, isHistoricalReplay);
+        // Refresh products, metrics, and WooCommerce data on events
         loadProducts();
         loadAnalytics();
         loadRecentBookings();
+        loadWooCommerceData();
       } catch (err) {
         console.warn(`Error handling event ${type}:`, err);
       }
@@ -306,7 +348,7 @@ function connectStream(replay = true) {
   });
 }
 
-function appendStreamEvent(type, data) {
+function appendStreamEvent(type, data, isReplay = false) {
   const container = document.getElementById('stream-feed-container');
   const item = document.createElement('div');
   item.className = `stream-event-item event-${type}`;
@@ -324,12 +366,27 @@ function appendStreamEvent(type, data) {
     summary = `Hold CANCELLED. Inventory returned to available stock.`;
   } else if (type === 'RESERVATION_REJECTED') {
     summary = `Reservation REJECTED: ${data.outcome || 'Insufficient stock'}`;
+  } else if (type === 'WOOCOMMERCE_ORDER_RESERVED') {
+    summary = `🛒 WooCommerce Order #${data.order_id}: Reserved ${data.quantity || 1} unit(s) [Booking: ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'}]`;
+  } else if (type === 'WOOCOMMERCE_ORDER_CONFIRMED') {
+    summary = `💳 WooCommerce Order #${data.order_id}: Payment complete! Booking ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'} confirmed.`;
+  } else if (type === 'WOOCOMMERCE_ORDER_CANCELLED') {
+    summary = `↩️ WooCommerce Order #${data.order_id}: Order cancelled. Hold released back to available stock.`;
+  } else if (type === 'WOOCOMMERCE_RESERVATION_REJECTED') {
+    summary = `🚫 WooCommerce Order #${data.order_id}: REJECTED due to insufficient stock!`;
+  } else if (type === 'WOOCOMMERCE_STOCK_SYNCED') {
+    summary = `🔄 WooCommerce Stock Synced: Product ${data.product_id ? data.product_id.substring(0, 8) : ''} -> Stock: ${data.stock_quantity} (${data.mode || 'LIVE'})`;
+  } else if (type === 'WOOCOMMERCE_OVERSELL_ALERT') {
+    summary = `🚨 OVERSELL ALERT on Order #${data.order_id}! ${data.error || 'Inventory depleted'}`;
   } else {
     summary = data.message || JSON.stringify(data);
   }
 
+  const replayTag = isReplay ? `<span class="badge-replay" title="Replayed event from event log">REPLAY</span>` : '';
+
   item.innerHTML = `
     <span class="event-time">${timeStr}</span>
+    ${replayTag}
     <span class="event-badge badge-${type}">${type}</span>
     <span class="event-summary">${summary}</span>
   `;
@@ -630,6 +687,158 @@ document.getElementById('btn-replay-stream').addEventListener('click', () => {
   connectStream(true);
 });
 
+// 13. WooCommerce Integration Data and Actions
+async function loadWooCommerceData() {
+  try {
+    const mappingsRes = await fetch('/woocommerce/mappings');
+    if (mappingsRes.ok) {
+      const mappings = await mappingsRes.json();
+      const tbody = document.getElementById('tbl-wc-mappings');
+      if (tbody) {
+        if (!mappings.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-subtle text-center">No store mappings configured. Click "Auto-Map Demo Items" above.</td></tr>';
+        } else {
+          tbody.innerHTML = mappings.map(m => `
+            <tr>
+              <td><strong class="font-mono text-purple">#${m.wc_product_id}</strong></td>
+              <td>${m.concord_product_name || (m.concord_product_id ? m.concord_product_id.substring(0, 8) : '')}</td>
+              <td><span class="badge ${m.concord_available_stock > 0 ? 'badge-success' : 'badge-danger'}">${m.concord_available_stock} Avail</span></td>
+              <td>${m.last_synced_at ? formatTime(m.last_synced_at) + ' (' + m.last_synced_stock + ' units)' : '<span class="text-subtle">Never</span>'}</td>
+              <td>
+                <button class="btn btn-secondary btn-xs btn-sync-single" data-pid="${m.concord_product_id}">Push Stock</button>
+              </td>
+            </tr>
+          `).join('');
+
+          document.querySelectorAll('.btn-sync-single').forEach(btn => {
+            btn.onclick = async () => {
+              const pid = btn.getAttribute('data-pid');
+              btn.innerText = 'Syncing...';
+              try {
+                const sRes = await fetch(`/woocommerce/sync/${pid}`, { method: 'POST' });
+                const sData = await sRes.json();
+                showToast(sData.message, sData.success ? 'success' : 'error');
+                loadWooCommerceData();
+              } catch (e) {
+                showToast('Sync failed', 'error');
+              }
+            };
+          });
+        }
+      }
+    }
+
+    const ordersRes = await fetch('/woocommerce/orders?limit=10');
+    if (ordersRes.ok) {
+      const orders = await ordersRes.json();
+      const tbody = document.getElementById('tbl-wc-orders');
+      if (tbody) {
+        if (!orders.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-subtle text-center">No WooCommerce orders received yet.</td></tr>';
+        } else {
+          tbody.innerHTML = orders.map(o => `
+            <tr>
+              <td><strong class="font-mono text-cyan">#${o.order_id}</strong></td>
+              <td><span class="badge ${o.status === 'processing' || o.status === 'completed' ? 'badge-success' : (o.status === 'cancelled' || o.status === 'failed' ? 'badge-danger' : 'badge-warning')}">${o.status.toUpperCase()}</span></td>
+              <td class="font-mono text-xs">${(o.booking_ids || []).map(b => b.substring(0, 8)).join(', ') || 'None'}</td>
+              <td>${formatTime(o.updated_at || o.created_at)}</td>
+            </tr>
+          `).join('');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load WooCommerce data', err);
+  }
+}
+
+// WooCommerce action button listeners
+const btnAutoMap = document.getElementById('btn-wc-auto-map');
+if (btnAutoMap) {
+  btnAutoMap.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/woocommerce/mappings/auto-map', { method: 'POST' });
+      if (res.ok) {
+        const seeded = await res.json();
+        showToast(`Auto-mapped ${seeded.length} product(s) to WooCommerce IDs`, 'success');
+        loadWooCommerceData();
+        checkHealth();
+      } else {
+        showToast('Auto-map failed', 'error');
+      }
+    } catch (e) {
+      showToast('Error during auto-map', 'error');
+    }
+  });
+}
+
+const btnSyncAll = document.getElementById('btn-wc-sync-all');
+if (btnSyncAll) {
+  btnSyncAll.addEventListener('click', async () => {
+    btnSyncAll.innerText = 'Syncing...';
+    try {
+      const res = await fetch('/woocommerce/sync-all', { method: 'POST' });
+      if (res.ok) {
+        const results = await res.json();
+        showToast(`Synchronized stock for ${results.length} mapped products`, 'success');
+        loadWooCommerceData();
+      } else {
+        showToast('Stock sync failed', 'error');
+      }
+    } catch (e) {
+      showToast('Error during stock sync', 'error');
+    } finally {
+      btnSyncAll.innerText = 'Sync All Stock';
+    }
+  });
+}
+
+const btnSimulate = document.getElementById('btn-wc-simulate');
+if (btnSimulate) {
+  btnSimulate.addEventListener('click', async () => {
+    btnSimulate.innerText = 'Simulating...';
+    try {
+      // Find first mapped WC product or use demo id 1001
+      const mappingsRes = await fetch('/woocommerce/mappings');
+      let targetWcPid = 1001;
+      if (mappingsRes.ok) {
+        const mappings = await mappingsRes.json();
+        if (mappings.length > 0) {
+          targetWcPid = mappings[0].wc_product_id;
+        } else {
+          // Auto map first
+          await fetch('/woocommerce/mappings/auto-map', { method: 'POST' });
+          targetWcPid = 1001;
+        }
+      }
+
+      const simRes = await fetch('/woocommerce/simulate-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wc_product_id: targetWcPid,
+          quantity: 1,
+          auto_complete_payment: true
+        })
+      });
+
+      if (simRes.ok) {
+        const simData = await simRes.json();
+        showToast(`Simulated Order #${simData.simulation_order_id} placed and paid!`, 'success');
+        refreshDashboard();
+      } else {
+        const err = await simRes.json();
+        showToast(err.detail || 'Simulation rejected (Out of Stock)', 'warning');
+        refreshDashboard();
+      }
+    } catch (e) {
+      showToast('Error simulating order', 'error');
+    } finally {
+      btnSimulate.innerText = 'Simulate WC Purchase';
+    }
+  });
+}
+
 document.getElementById('btn-refresh-all').addEventListener('click', () => {
   refreshDashboard();
   showToast('Dashboard refreshed', 'info');
@@ -640,6 +849,7 @@ function refreshDashboard() {
   loadProducts();
   loadAnalytics();
   loadRecentBookings();
+  loadWooCommerceData();
 }
 
 // Initialization on DOM load
