@@ -1,0 +1,204 @@
+{
+  "database": "concord",
+  "engine": "MongoDB 7.0 (NoSQL Document Store)",
+  "coordination_store": "Redis 7.2 (Atomic Lua & Stream Coordination)",
+  "collections": {
+    "products": {
+      "description": "Authoritative durable catalog of inventory products.",
+      "schema_validation": {
+        "bsonType": "object",
+        "required": ["_id", "name", "initial_stock", "created_at", "updated_at"],
+        "properties": {
+          "_id": { "bsonType": "string", "description": "Unique UUID product identifier" },
+          "name": { "bsonType": "string", "description": "Unique display name of product" },
+          "description": { "bsonType": ["string", "null"], "description": "Detailed description" },
+          "initial_stock": { "bsonType": "int", "minimum": 0, "description": "Total non-negative initial stock" },
+          "created_at": { "bsonType": "string", "description": "ISO-8601 UTC creation timestamp" },
+          "updated_at": { "bsonType": "string", "description": "ISO-8601 UTC modification timestamp" }
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_products_name_unique",
+          "key": { "name": 1 },
+          "unique": true,
+          "justification": "Guarantees product name uniqueness and accelerates product lookups by name."
+        }
+      ],
+      "representative_document": {
+        "_id": "prod-rtx-4090",
+        "name": "NVIDIA GeForce RTX 4090 24GB",
+        "description": "High-demand flagship GPU (Target for High-Contention Stress Tests)",
+        "initial_stock": 10,
+        "created_at": "2026-10-14T05:10:20.195000Z",
+        "updated_at": "2026-10-14T05:10:20.195000Z"
+      }
+    },
+    "bookings": {
+      "description": "Durable reservation holds and confirmed booking records.",
+      "schema_validation": {
+        "bsonType": "object",
+        "required": ["_id", "product_id", "quantity", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": { "bsonType": "string", "description": "Unique UUID booking identifier" },
+          "product_id": { "bsonType": "string", "description": "Foreign key reference to products._id" },
+          "quantity": { "bsonType": "int", "minimum": 1, "description": "Units reserved or confirmed" },
+          "status": {
+            "enum": ["HELD", "CONFIRMED", "EXPIRED", "CANCELLED"],
+            "description": "Finite state machine status for inventory reservation"
+          },
+          "idempotency_key": { "bsonType": ["string", "null"], "description": "Client supplied idempotency token" },
+          "created_at": { "bsonType": "string", "description": "ISO-8601 UTC creation timestamp" },
+          "updated_at": { "bsonType": "string", "description": "ISO-8601 UTC last state transition timestamp" },
+          "expires_at": { "bsonType": ["string", "null"], "description": "ISO-8601 UTC hold expiration deadline" },
+          "confirmed_at": { "bsonType": ["string", "null"], "description": "ISO-8601 UTC confirmation timestamp" }
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_bookings_product_status",
+          "key": { "product_id": 1, "status": 1 },
+          "unique": false,
+          "justification": "Supports high-frequency queries checking active holds and confirmed units for a specific product."
+        },
+        {
+          "name": "idx_bookings_status_expires",
+          "key": { "status": 1, "expires_at": 1 },
+          "unique": false,
+          "justification": "Optimizes background expiration worker queries querying for status=HELD where expires_at <= now."
+        },
+        {
+          "name": "idx_bookings_idempotency_key_unique",
+          "key": { "idempotency_key": 1 },
+          "unique": true,
+          "sparse": true,
+          "justification": "Enforces strict uniqueness so no duplicate booking documents can be created with identical idempotency key."
+        },
+        {
+          "name": "idx_bookings_created_desc",
+          "key": { "created_at": -1 },
+          "unique": false,
+          "justification": "Provides fast reverse-chronological sorting for audit logs and dashboard recent bookings list."
+        }
+      ],
+      "representative_document": {
+        "_id": "67cfc0e2-63b5-4a61-9c86-90b9b32e18d4",
+        "product_id": "prod-rtx-4090",
+        "quantity": 1,
+        "status": "CONFIRMED",
+        "idempotency_key": "idemp-client-101-uuid",
+        "created_at": "2026-10-14T05:12:00.000000Z",
+        "updated_at": "2026-10-14T05:12:08.500000Z",
+        "expires_at": "2026-10-14T05:12:30.000000Z",
+        "confirmed_at": "2026-10-14T05:12:08.500000Z"
+      }
+    },
+    "idempotency_records": {
+      "description": "Atomic request tokens and cached logical outcomes for exactly-once semantics.",
+      "schema_validation": {
+        "bsonType": "object",
+        "required": ["idempotency_key", "request_fingerprint", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": { "bsonType": "objectId" },
+          "idempotency_key": { "bsonType": "string", "description": "Unique client token" },
+          "request_fingerprint": { "bsonType": "string", "description": "SHA-256 hash of operation and payload" },
+          "booking_id": { "bsonType": ["string", "null"], "description": "Associated booking identifier upon completion" },
+          "status": { "enum": ["IN_PROGRESS", "COMPLETED", "FAILED"], "description": "Idempotency lifecycle status" },
+          "response_code": { "bsonType": ["int", "null"], "description": "Original HTTP response code cached" },
+          "response_payload": { "bsonType": ["object", "null"], "description": "Original response body returned to client" },
+          "created_at": { "bsonType": "string" },
+          "updated_at": { "bsonType": "string" }
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_idempotency_key_unique",
+          "key": { "idempotency_key": 1 },
+          "unique": true,
+          "justification": "Primary idempotency guard ensuring only one atomic execution per key."
+        },
+        {
+          "name": "idx_idempotency_created_desc",
+          "key": { "created_at": -1 },
+          "unique": false,
+          "justification": "Supports chronological queries and TTL purging of historical idempotency records."
+        }
+      ],
+      "representative_document": {
+        "_id": "670c9eb2f18392a839e01234",
+        "idempotency_key": "idemp-client-101-uuid",
+        "request_fingerprint": "a3b2c1d0e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1",
+        "status": "COMPLETED",
+        "booking_id": "67cfc0e2-63b5-4a61-9c86-90b9b32e18d4",
+        "response_code": 201,
+        "response_payload": {
+          "booking_id": "67cfc0e2-63b5-4a61-9c86-90b9b32e18d4",
+          "product_id": "prod-rtx-4090",
+          "quantity": 1,
+          "status": "HELD",
+          "expires_at": "2026-10-14T05:12:30.000000Z",
+          "idempotency_key": "idemp-client-101-uuid",
+          "message": "Reserved 1 units successfully.",
+          "cached": false
+        },
+        "created_at": "2026-10-14T05:12:00.000000Z",
+        "updated_at": "2026-10-14T05:12:00.120000Z"
+      }
+    },
+    "reservation_operations": {
+      "description": "Cross-database transaction audit log and recovery intent tracker.",
+      "schema_validation": {
+        "bsonType": "object",
+        "required": ["_id", "booking_id", "product_id", "quantity", "operation_type", "status", "created_at", "updated_at"],
+        "properties": {
+          "_id": { "bsonType": "string", "description": "Unique operation UUID" },
+          "booking_id": { "bsonType": "string", "description": "Associated booking identifier" },
+          "product_id": { "bsonType": "string", "description": "Product referenced" },
+          "quantity": { "bsonType": "int", "description": "Units under operation" },
+          "operation_type": { "enum": ["RESERVE", "CONFIRM", "CANCEL", "EXPIRE"], "description": "Type of state transition" },
+          "status": {
+            "enum": [
+              "PENDING_REDIS",
+              "REDIS_HELD",
+              "COMPLETED",
+              "FAILED_REDIS_INSUFFICIENT_STOCK",
+              "COMPENSATED_ROLLED_BACK",
+              "RECONCILED_RELEASED"
+            ],
+            "description": "Granular execution phase across MongoDB and Redis"
+          },
+          "attempt_count": { "bsonType": "int" },
+          "created_at": { "bsonType": "string" },
+          "updated_at": { "bsonType": "string" },
+          "last_error": { "bsonType": ["string", "null"] }
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_operations_status_created",
+          "key": { "status": 1, "created_at": 1 },
+          "unique": false,
+          "justification": "Enables the reconciliation worker to rapidly poll in-flight or dangling operations (e.g. REDIS_HELD) without scanning entire collection."
+        },
+        {
+          "name": "idx_operations_booking_id",
+          "key": { "booking_id": 1 },
+          "unique": false,
+          "justification": "Facilitates rapid retrieval of operation attempt history for any specific booking."
+        }
+      ],
+      "representative_document": {
+        "_id": "op-43a9b1c2-d3e4-5f6a-7b8c-9d0e1f2a3b4c",
+        "booking_id": "67cfc0e2-63b5-4a61-9c86-90b9b32e18d4",
+        "product_id": "prod-rtx-4090",
+        "quantity": 1,
+        "operation_type": "RESERVE",
+        "status": "COMPLETED",
+        "attempt_count": 1,
+        "created_at": "2026-10-14T05:12:00.000000Z",
+        "updated_at": "2026-10-14T05:12:00.115000Z",
+        "last_error": null
+      }
+    }
+  }
+}

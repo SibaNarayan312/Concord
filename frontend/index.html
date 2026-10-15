@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Concord — High-Contention Inventory Reservation Service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Bar -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">CONCORD</span>
+          <span class="brand-subtitle">High-Contention Inventory Reservation Service</span>
+        </div>
+      </div>
+
+      <div class="header-badges">
+        <div class="status-chip" id="mongo-status-chip">
+          <span class="status-dot"></span>
+          <span class="status-label">MongoDB: <strong id="mongo-status-text">Checking...</strong></span>
+        </div>
+        <div class="status-chip" id="redis-status-chip">
+          <span class="status-dot"></span>
+          <span class="status-label">Redis: <strong id="redis-status-text">Checking...</strong></span>
+        </div>
+        <div class="status-chip live-chip" id="sse-status-chip">
+          <span class="pulse-dot"></span>
+          <span class="status-label">Stream: <strong id="sse-status-text">Connecting...</strong></span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-all" title="Refresh all dashboard data">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-layout">
+    <!-- Hero / Architecture Banner -->
+    <section class="hero-banner">
+      <div class="hero-content">
+        <div class="hero-pill">NoSQL Database Project &bull; Review 1 &amp; Review 2</div>
+        <h1 class="hero-title">Atomic Inventory Reservation &amp; Live Contention Coordination</h1>
+        <p class="hero-desc">
+          Enforcing <strong>zero-oversell invariants</strong> under extreme concurrency with <strong>Redis Lua scripts</strong>,
+          durable <strong>MongoDB audit storage</strong>, distributed idempotency keys, and automated hold recovery.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button class="btn btn-primary" id="btn-open-create-modal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          New Product
+        </button>
+        <button class="btn btn-danger-soft" id="btn-reset-db">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+          Reset Demo Data
+        </button>
+      </div>
+    </section>
+
+    <!-- Metrics Summary Cards -->
+    <section class="metrics-grid">
+      <div class="metric-card glass-panel">
+        <div class="metric-header">
+          <span class="metric-title">Total Products</span>
+          <span class="metric-icon blue">📦</span>
+        </div>
+        <div class="metric-value" id="metric-total-products">-</div>
+        <div class="metric-foot">Durable catalog items in MongoDB</div>
+      </div>
+
+      <div class="metric-card glass-panel">
+        <div class="metric-header">
+          <span class="metric-title">Active Holds</span>
+          <span class="metric-icon amber">⏳</span>
+        </div>
+        <div class="metric-value highlight-amber" id="metric-active-holds">-</div>
+        <div class="metric-foot">Units reserved pending confirmation</div>
+      </div>
+
+      <div class="metric-card glass-panel">
+        <div class="metric-header">
+          <span class="metric-title">Confirmed Bookings</span>
+          <span class="metric-icon emerald">✅</span>
+        </div>
+        <div class="metric-value highlight-emerald" id="metric-confirmed-bookings">-</div>
+        <div class="metric-foot">Finalized purchases in MongoDB</div>
+      </div>
+
+      <div class="metric-card glass-panel">
+        <div class="metric-header">
+          <span class="metric-title">Expired / Returned</span>
+          <span class="metric-icon purple">🔄</span>
+        </div>
+        <div class="metric-value highlight-purple" id="metric-expired-bookings">-</div>
+        <div class="metric-foot">Holds recovered by background worker</div>
+      </div>
+
+      <div class="metric-card glass-panel">
+        <div class="metric-header">
+          <span class="metric-title">Zero-Oversell Invariant</span>
+          <span class="metric-icon cyan">🛡️</span>
+        </div>
+        <div class="metric-value" id="metric-invariant-badge">
+          <span class="badge badge-success">SATISFIED</span>
+        </div>
+        <div class="metric-foot" id="metric-invariant-detail">Available + Holds + Sold == Initial</div>
+      </div>
+    </section>
+
+    <!-- Split Main Workspace -->
+    <div class="workspace-grid">
+      <!-- Left Column: Products & Quick Reservation -->
+      <div class="column-left">
+        <!-- Products Catalog -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Live Inventory Catalog</h2>
+              <span class="card-badge" id="product-count-badge">0 items</span>
+            </div>
+            <span class="text-subtle">Atomic Redis Stock + Mongo State</span>
+          </div>
+
+          <div class="products-list" id="products-container">
+            <div class="empty-state">Loading products...</div>
+          </div>
+        </section>
+
+        <!-- Interactive Reservation Action Box -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Interactive Reservation &amp; Hold Simulator</h2>
+            </div>
+            <span class="chip-purple">Atomic Lua Script</span>
+          </div>
+
+          <form id="reservation-form" class="form-grid">
+            <div class="form-group">
+              <label for="res-product-select">Select Product</label>
+              <select id="res-product-select" class="form-control" required></select>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="res-quantity">Units to Reserve</label>
+                <input type="number" id="res-quantity" class="form-control" value="1" min="1" max="100" required>
+              </div>
+              <div class="form-group">
+                <label for="res-ttl">Hold Duration (Seconds)</label>
+                <input type="number" id="res-ttl" class="form-control" value="15" min="3" max="300" required>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-action">
+                <label for="res-idempotency-key">Client Idempotency Key</label>
+                <button type="button" class="btn-link" id="btn-regen-key">Generate New</button>
+              </div>
+              <div class="input-with-copy">
+                <input type="text" id="res-idempotency-key" class="form-control font-mono" required readonly>
+              </div>
+              <small class="form-hint">Guarantees exactly-once reservation semantics even upon client retries.</small>
+            </div>
+
+            <div class="form-actions-inline">
+              <button type="submit" class="btn btn-primary btn-block" id="btn-submit-reserve">
+                Acquire Temporary Hold
+              </button>
+            </div>
+          </form>
+
+          <!-- Active Reservation Card (shown after hold creation) -->
+          <div id="active-hold-container" class="active-hold-panel" style="display: none;">
+            <div class="hold-panel-header">
+              <span class="hold-badge-live">ACTIVE HOLD</span>
+              <span class="hold-timer" id="hold-countdown">15s remaining</span>
+            </div>
+            <div class="hold-details-grid">
+              <div>Booking ID: <strong class="font-mono text-cyan" id="hold-booking-id">-</strong></div>
+              <div>Reserved: <strong id="hold-units">-</strong> unit(s)</div>
+              <div>Product: <strong id="hold-product-name">-</strong></div>
+              <div>Expires At: <span class="text-subtle font-mono" id="hold-expires-at">-</span></div>
+            </div>
+            <div class="hold-actions">
+              <button class="btn btn-success" id="btn-confirm-hold">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                Confirm Booking
+              </button>
+              <button class="btn btn-danger" id="btn-cancel-hold">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Cancel Hold
+              </button>
+            </div>
+          </div>
+
+          <!-- Stress Test Runner -->
+          <div class="stress-box">
+            <div class="stress-header">
+              <div>
+                <strong>High-Contention Load Benchmark</strong>
+                <p class="text-subtle text-xs">Simulate 100 concurrent requests competing for 10 units</p>
+              </div>
+              <button class="btn btn-accent btn-sm" id="btn-run-stress-test">
+                🚀 Run 100-Client Race
+              </button>
+            </div>
+            <div id="stress-result-box" class="stress-result" style="display: none;"></div>
+          </div>
+        </section>
+
+        <!-- MongoDB Aggregation Analytics -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">MongoDB Aggregation Pipelines</h2>
+            </div>
+            <span class="chip-cyan">Real-time Pipelines</span>
+          </div>
+
+          <div class="tabs-nav">
+            <button class="tab-btn active" data-tab="tab-status">Bookings by Status ($group)</button>
+            <button class="tab-btn" data-tab="tab-perf">Product Performance ($lookup)</button>
+            <button class="tab-btn" data-tab="tab-indexes">MongoDB Indexes</button>
+          </div>
+
+          <div class="tab-contents">
+            <div class="tab-content active" id="tab-status">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Booking Count</th>
+                    <th>Total Units</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-bookings-status">
+                  <tr><td colspan="3" class="text-subtle text-center">Loading aggregation...</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="tab-content" id="tab-perf">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Stock</th>
+                    <th>Active Holds</th>
+                    <th>Confirmed</th>
+                    <th>Expired</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-product-perf">
+                  <tr><td colspan="5" class="text-subtle text-center">Loading aggregation...</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="tab-content" id="tab-indexes">
+              <div id="index-list-container" class="index-inspect-list">
+                Loading index metadata...
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Live Contention Stream & Audit Log -->
+      <div class="column-right">
+        <section class="card glass-panel stream-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Live Contention Stream</h2>
+              <span class="live-indicator">
+                <span class="live-dot"></span>
+                SSE &bull; Redis Streams
+              </span>
+            </div>
+            <div class="header-actions-sm">
+              <button class="btn btn-secondary btn-xs" id="btn-replay-stream" title="Replay all events from beginning">
+                Replay From Start
+              </button>
+              <button class="btn btn-secondary btn-xs" id="btn-clear-feed" title="Clear event feed">
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div class="stream-feed-wrapper">
+            <div class="stream-feed" id="stream-feed-container">
+              <div class="stream-event-item system-event">
+                <span class="event-time">--:--:--</span>
+                <span class="event-badge badge-info">SYSTEM</span>
+                <span class="event-summary">Connecting to Redis Stream SSE endpoint...</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Bookings Audit Trail -->
+        <section class="card glass-panel">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h2 class="card-title">Durable Booking Audit Trail</h2>
+              <span class="text-subtle">MongoDB Collection: bookings</span>
+            </div>
+          </div>
+          <div class="table-scroll-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Booking ID</th>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="tbl-bookings-recent">
+                <tr><td colspan="5" class="text-subtle text-center">Loading bookings...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- Create Product Modal -->
+  <div class="modal-overlay" id="modal-create-product">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Create New Inventory Product</h3>
+        <button class="modal-close" id="btn-close-product-modal">&times;</button>
+      </div>
+      <form id="form-create-product">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="new-prod-name">Product Name</label>
+            <input type="text" id="new-prod-name" class="form-control" placeholder="e.g. RTX 5090 Limited Edition" required>
+          </div>
+          <div class="form-group">
+            <label for="new-prod-stock">Initial Stock Quantity</label>
+            <input type="number" id="new-prod-stock" class="form-control" value="20" min="0" required>
+          </div>
+          <div class="form-group">
+            <label for="new-prod-desc">Description</label>
+            <textarea id="new-prod-desc" class="form-control" rows="2" placeholder="Brief description..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-product-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Product</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
