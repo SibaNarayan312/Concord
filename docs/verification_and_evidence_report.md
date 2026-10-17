@@ -553,4 +553,58 @@ tests/test_woocommerce_integration.py::test_mandatory_100_concurrent_woocommerce
 5. **Connection Pool Optimization**:
    - Refactored `RedisClientManager` to maintain a single bounded connection pool (`max_connections=200`) and removed redundant per-request `ping()` calls, eliminating connection exhaustion under high concurrency.
 
+---
 
+### 12.6 Dashboard Order ID & Duplicate Stream Event Verification
+
+- **Date**: 2026-10-17
+- **Scope**: Frontend SSE Consumption, Redis Stream Envelope Projection, and Webhook Stream Suppression
+- **Test File**: `tests/test_dashboard_event_fixes.py` (4 automated regression tests)
+- **Full Suite Status**: **34 passed, 0 failed, 0 skipped in 11.82s** (100% pass rate)
+
+#### 1. Root Cause & Resolution: `#undefined` WooCommerce Order ID
+- **Root Cause**: `StreamService.sse_event_generator()` and `get_recent_events()` projected `product_id`, `booking_id`, and `quantity` to the root dictionary, but kept `order_id`, `error`, `stock_quantity`, and `mode` exclusively nested inside `"data": fields`. Meanwhile, `frontend/dashboard.js` template strings evaluated `data.order_id` directly, producing `WooCommerce Order #undefined`.
+- **Backend Fix (`backend/services/stream_service.py`)**: Added `_format_stream_event()` helper that explicitly projects `order_id`, `error`, `stock_quantity`, and `mode` to the root JSON object for both live and replayed SSE events, while preserving `"data": fields` for backward compatibility. Malformed numeric values are converted safely to `None`.
+- **Frontend Fix (`frontend/dashboard.js`)**: Updated `appendStreamEvent()` to read `orderId` from top-level `data.order_id`, falling back to `data.data.order_id`, with safe default `'N/A'` only if both are missing.
+
+#### 2. Root Cause & Resolution: Duplicate Stream Event Entries
+- **Root Cause A (Subsequent Webhook Deliveries)**: When WooCommerce sent `order.created` followed by `order.updated` while the order was still `pending`, `ReservationService.create_reservation()` correctly returned the cached reservation (stock was untouched). However, `WooCommerceService.process_order_webhook()` unconditionally called `r.xadd(..., "WOOCOMMERCE_ORDER_RESERVED")`, emitting a duplicate stream card for the same reservation.
+- **Backend Fix (`backend/services/woocommerce_service.py`)**: Added guard `is_new_hold = not getattr(res_resp, "cached", False)`. High-level reservation events are emitted only for new holds; idempotent duplicates log an acknowledgement and suppress stream emission.
+- **Root Cause B (SSE Reconnection / Replay)**: Browser `EventSource` reconnection replayed past events without DOM checks, prepending already-displayed events a second time.
+- **Frontend Fix (`frontend/dashboard.js`)**: Implemented DOM-level deduplication checking `container.querySelector('[data-event-id="' + data.event_id + '"]')` before rendering. Distinct event IDs for the same order remain visible.
+
+#### 3. Automated Regression Test Evidence
+Executed automated regression suite (`tests/test_dashboard_event_fixes.py`):
+```powershell
+python -m pytest -v tests/test_dashboard_event_fixes.py
+```
+- `test_01_stream_service_format_stream_event_safe_projection`: **PASSED** (verifies top-level field projection and safe type coercion).
+- `test_02_recent_events_and_sse_payload_structure`: **PASSED** (verifies live SSE and replay generators yield top-level `order_id`).
+- `test_03_duplicate_webhook_deliveries_do_not_emit_duplicate_stream_events`: **PASSED** (verifies delivery ID deduplication and stream suppression).
+- `test_04_frontend_javascript_dom_deduplication_and_order_id_rendering`: **PASSED** (Node.js headless DOM test verifying `#12345` rendering and DOM deduplication).
+
+#### 4. Full Test Suite Execution (34 Passed)
+```powershell
+python -m pytest tests/
+```
+```
+collected 34 items
+
+tests/test_analytics_aggregations.py .                                   [  2%]
+tests/test_dashboard_event_fixes.py ....                                 [ 14%]
+tests/test_events_sse.py ..                                              [ 20%]
+tests/test_health.py .                                                   [ 23%]
+tests/test_hold_expiration.py .                                          [ 26%]
+tests/test_idempotency.py ...                                            [ 35%]
+tests/test_phase1_validation.py ..........                               [ 64%]
+tests/test_products_crud.py .                                            [ 67%]
+tests/test_recovery.py .                                                 [ 70%]
+tests/test_reservations_concurrency.py ...                               [ 79%]
+tests/test_woocommerce_integration.py .......                            [100%]
+
+======================= 34 passed, 2 warnings in 11.82s =======================
+```
+
+#### 5. Verification Separation
+- **Automated Evidence**: 100% verified via automated test suite, live ASGI queries to `/events/recent`, and Node.js headless DOM script execution.
+- **Manual Verification**: Visual confirmation in an interactive browser tab (e.g. Chrome) requires opening `http://localhost:8000` to manually view the CSS glassmorphism styling and live countdown animations.
