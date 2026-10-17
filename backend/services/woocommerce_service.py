@@ -313,22 +313,29 @@ class WooCommerceService:
                         "quantity": item["quantity"]
                     })
 
-                    # Emit WooCommerce-specific reservation event to Redis Stream
-                    r = await redis_manager.connect()
-                    await r.xadd(
-                        stream_key(),
-                        {
-                            "event_type": "WOOCOMMERCE_ORDER_RESERVED",
-                            "order_id": str(order_id),
-                            "booking_id": res_resp.booking_id,
-                            "product_id": item["concord_product_id"],
-                            "quantity": str(item["quantity"]),
-                            "timestamp": now_str,
-                            "outcome": "HELD"
-                        },
-                        maxlen=settings.STREAM_MAX_LEN,
-                        approximate=True
-                    )
+                    # Emit WooCommerce-specific reservation event to Redis Stream only for new holds
+                    is_new_hold = not getattr(res_resp, "cached", False)
+                    if is_new_hold:
+                        r = await redis_manager.connect()
+                        await r.xadd(
+                            stream_key(),
+                            {
+                                "event_type": "WOOCOMMERCE_ORDER_RESERVED",
+                                "order_id": str(order_id),
+                                "booking_id": res_resp.booking_id,
+                                "product_id": item["concord_product_id"],
+                                "quantity": str(item["quantity"]),
+                                "timestamp": now_str,
+                                "outcome": "HELD"
+                            },
+                            maxlen=settings.STREAM_MAX_LEN,
+                            approximate=True
+                        )
+                    else:
+                        logger.info(
+                            f"Idempotent duplicate hold detected for order {order_id}, "
+                            f"booking {res_resp.booking_id}. Skipping duplicate stream event."
+                        )
 
                 except HTTPException as e:
                     logger.warning(f"Reservation hold failed for order {order_id}, item {item['item_id']}: {e.detail}")

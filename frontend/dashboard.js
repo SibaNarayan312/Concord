@@ -350,10 +350,39 @@ function connectStream(replay = true) {
 
 function appendStreamEvent(type, data, isReplay = false) {
   const container = document.getElementById('stream-feed-container');
+
+  // DOM-level deduplication using event_id
+  if (data.event_id) {
+    const existing = container.querySelector(`[data-event-id="${data.event_id}"]`);
+    if (existing) {
+      return; // Already rendered in feed (e.g. from live stream or reconnect replay)
+    }
+  }
+
   const item = document.createElement('div');
   item.className = `stream-event-item event-${type}`;
+  if (data.event_id) {
+    item.setAttribute('data-event-id', data.event_id);
+  }
 
   const timeStr = formatTime(data.timestamp || new Date().toISOString());
+
+  // Safe fallback resolution for order ID, stock quantity, mode, and errors
+  const orderId = (data.order_id !== undefined && data.order_id !== null && data.order_id !== '')
+    ? data.order_id
+    : (data.data && data.data.order_id !== undefined && data.data.order_id !== null && data.data.order_id !== '')
+      ? data.data.order_id
+      : 'N/A';
+
+  const stockQty = (data.stock_quantity !== undefined && data.stock_quantity !== null)
+    ? data.stock_quantity
+    : (data.data && data.data.stock_quantity !== undefined && data.data.stock_quantity !== null)
+      ? data.data.stock_quantity
+      : '--';
+
+  const mode = data.mode || (data.data && data.data.mode) || 'LIVE';
+  const errorMsg = data.error || (data.data && data.data.error) || 'Inventory depleted';
+
   let summary = '';
 
   if (type === 'HOLD_CREATED') {
@@ -367,17 +396,17 @@ function appendStreamEvent(type, data, isReplay = false) {
   } else if (type === 'RESERVATION_REJECTED') {
     summary = `Reservation REJECTED: ${data.outcome || 'Insufficient stock'}`;
   } else if (type === 'WOOCOMMERCE_ORDER_RESERVED') {
-    summary = `🛒 WooCommerce Order #${data.order_id}: Reserved ${data.quantity || 1} unit(s) [Booking: ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'}]`;
+    summary = `🛒 WooCommerce Order #${orderId}: Reserved ${data.quantity || 1} unit(s) [Booking: ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'}]`;
   } else if (type === 'WOOCOMMERCE_ORDER_CONFIRMED') {
-    summary = `💳 WooCommerce Order #${data.order_id}: Payment complete! Booking ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'} confirmed.`;
+    summary = `💳 WooCommerce Order #${orderId}: Payment complete! Booking ${data.booking_id ? data.booking_id.substring(0, 8) : 'N/A'} confirmed.`;
   } else if (type === 'WOOCOMMERCE_ORDER_CANCELLED') {
-    summary = `↩️ WooCommerce Order #${data.order_id}: Order cancelled. Hold released back to available stock.`;
+    summary = `↩️ WooCommerce Order #${orderId}: Order cancelled. Hold released back to available stock.`;
   } else if (type === 'WOOCOMMERCE_RESERVATION_REJECTED') {
-    summary = `🚫 WooCommerce Order #${data.order_id}: REJECTED due to insufficient stock!`;
+    summary = `🚫 WooCommerce Order #${orderId}: REJECTED due to insufficient stock!`;
   } else if (type === 'WOOCOMMERCE_STOCK_SYNCED') {
-    summary = `🔄 WooCommerce Stock Synced: Product ${data.product_id ? data.product_id.substring(0, 8) : ''} -> Stock: ${data.stock_quantity} (${data.mode || 'LIVE'})`;
+    summary = `🔄 WooCommerce Stock Synced: Product ${data.product_id ? data.product_id.substring(0, 8) : ''} -> Stock: ${stockQty} (${mode})`;
   } else if (type === 'WOOCOMMERCE_OVERSELL_ALERT') {
-    summary = `🚨 OVERSELL ALERT on Order #${data.order_id}! ${data.error || 'Inventory depleted'}`;
+    summary = `🚨 OVERSELL ALERT on Order #${orderId}! ${errorMsg}`;
   } else {
     summary = data.message || JSON.stringify(data);
   }

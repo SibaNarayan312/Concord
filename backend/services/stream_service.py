@@ -10,6 +10,38 @@ logger = logging.getLogger("concord.stream")
 
 class StreamService:
     @staticmethod
+    def _format_stream_event(msg_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Formats and projects stream fields into a standardized, backward-compatible event payload."""
+        qty = None
+        if fields.get("quantity"):
+            try:
+                qty = int(fields["quantity"])
+            except (ValueError, TypeError):
+                qty = None
+
+        stock_qty = None
+        if fields.get("stock_quantity"):
+            try:
+                stock_qty = int(fields["stock_quantity"])
+            except (ValueError, TypeError):
+                stock_qty = None
+
+        return {
+            "event_id": msg_id,
+            "event_type": fields.get("event_type", "UNKNOWN"),
+            "product_id": fields.get("product_id", ""),
+            "booking_id": fields.get("booking_id", ""),
+            "quantity": qty,
+            "timestamp": fields.get("timestamp", ""),
+            "outcome": fields.get("outcome", ""),
+            "order_id": fields.get("order_id"),
+            "error": fields.get("error"),
+            "stock_quantity": stock_qty,
+            "mode": fields.get("mode"),
+            "data": fields
+        }
+
+    @staticmethod
     async def get_recent_events(count: int = 50) -> List[Dict[str, Any]]:
         """Returns the most recent events from the Redis Stream."""
         r = await redis_manager.connect()
@@ -17,16 +49,7 @@ class StreamService:
         raw_events = await r.xrevrange(stream_key(), max="+", min="-", count=count)
         events = []
         for msg_id, fields in reversed(raw_events):
-            events.append({
-                "event_id": msg_id,
-                "event_type": fields.get("event_type", "UNKNOWN"),
-                "product_id": fields.get("product_id", ""),
-                "booking_id": fields.get("booking_id", ""),
-                "quantity": int(fields.get("quantity", 0)) if fields.get("quantity") else None,
-                "timestamp": fields.get("timestamp", ""),
-                "outcome": fields.get("outcome", ""),
-                "data": fields
-            })
+            events.append(StreamService._format_stream_event(msg_id, fields))
         return events
 
     @staticmethod
@@ -75,16 +98,7 @@ class StreamService:
                             yield {
                                 "event": fields.get("event_type", "LIFECYCLE_EVENT"),
                                 "id": msg_id,
-                                "data": json.dumps({
-                                    "event_id": msg_id,
-                                    "event_type": fields.get("event_type", "UNKNOWN"),
-                                    "product_id": fields.get("product_id", ""),
-                                    "booking_id": fields.get("booking_id", ""),
-                                    "quantity": int(fields.get("quantity", 0)) if fields.get("quantity") else None,
-                                    "timestamp": fields.get("timestamp", ""),
-                                    "outcome": fields.get("outcome", ""),
-                                    "data": fields
-                                })
+                                "data": json.dumps(StreamService._format_stream_event(msg_id, fields))
                             }
             except Exception as e:
                 logger.warning(f"Error during initial event replay: {e}")
@@ -104,16 +118,7 @@ class StreamService:
                             yield {
                                 "event": fields.get("event_type", "LIFECYCLE_EVENT"),
                                 "id": msg_id,
-                                "data": json.dumps({
-                                    "event_id": msg_id,
-                                    "event_type": fields.get("event_type", "UNKNOWN"),
-                                    "product_id": fields.get("product_id", ""),
-                                    "booking_id": fields.get("booking_id", ""),
-                                    "quantity": int(fields.get("quantity", 0)) if fields.get("quantity") else None,
-                                    "timestamp": fields.get("timestamp", ""),
-                                    "outcome": fields.get("outcome", ""),
-                                    "data": fields
-                                })
+                                "data": json.dumps(StreamService._format_stream_event(msg_id, fields))
                             }
                 else:
                     idle_ticks += 1
