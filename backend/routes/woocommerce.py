@@ -47,16 +47,36 @@ async def auto_map_demo_products():
 async def handle_woocommerce_webhook(
     request: Request,
     x_wc_webhook_signature: Optional[str] = Header(None),
-    x_wc_webhook_topic: Optional[str] = Header("order.updated"),
+    x_wc_webhook_topic: Optional[str] = Header(None),
     x_wc_webhook_delivery_id: Optional[str] = Header(None)
 ):
     """
     Primary webhook receiver for WooCommerce order lifecycle events.
     Verifies HMAC-SHA256 signature, deduplicates delivery IDs, and coordinates reservations.
+    Also handles WooCommerce URL reachability pings (deliver_ping) sent upon webhook creation.
     """
     raw_body = await request.body()
+    content_type = request.headers.get("content-type", "")
+    body_str = raw_body.decode("utf-8", errors="ignore")
 
-    # 1. Signature Verification
+    # 1. WooCommerce Reachability Ping Verification
+    # When saving/testing webhooks in WordPress, WooCommerce core executes WC_Webhook::deliver_ping(),
+    # sending 'application/x-www-form-urlencoded' with body 'webhook_id=<id>' to assert a 2xx HTTP response.
+    # It does not include HMAC signatures or order data.
+    if ("webhook_id=" in body_str or "application/x-www-form-urlencoded" in content_type) and not x_wc_webhook_signature:
+        webhook_id = "unknown"
+        for part in body_str.split("&"):
+            if part.startswith("webhook_id="):
+                webhook_id = part.split("=")[1]
+                break
+        logger.info(f"WooCommerce webhook reachability ping acknowledged (webhook_id={webhook_id}).")
+        return {
+            "status": "SUCCESS",
+            "message": "WooCommerce webhook verification ping acknowledged.",
+            "webhook_id": webhook_id
+        }
+
+    # 2. Strict HMAC-SHA256 Signature Verification for all event webhooks
     is_valid = WooCommerceService.verify_webhook_signature(raw_body, x_wc_webhook_signature)
     if not is_valid:
         logger.warning(f"Unauthorized WooCommerce webhook received: signature verification failed.")
@@ -65,7 +85,7 @@ async def handle_woocommerce_webhook(
             detail="Invalid HMAC-SHA256 webhook signature."
         )
 
-    # 2. Parse payload
+    # 3. Parse JSON payload
     try:
         payload = json.loads(raw_body.decode("utf-8"))
     except Exception as e:

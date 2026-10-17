@@ -13,6 +13,16 @@ def generate_wc_signature(payload_bytes: bytes, secret: str) -> str:
     digest = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
     return base64.b64encode(digest).decode("utf-8")
 
+def make_wc_headers(payload_bytes: bytes, topic: str = "order.created", delivery_id: str = None) -> dict:
+    headers = {
+        "Content-Type": "application/json",
+        "x-wc-webhook-topic": topic,
+        "x-wc-webhook-delivery-id": delivery_id or f"del-{uuid.uuid4()}"
+    }
+    if settings.WC_WEBHOOK_SECRET:
+        headers["x-wc-webhook-signature"] = generate_wc_signature(payload_bytes, settings.WC_WEBHOOK_SECRET)
+    return headers
+
 @pytest.mark.asyncio
 async def test_woocommerce_mapping_lifecycle(client: httpx.AsyncClient, test_product):
     pid = test_product["id"]
@@ -136,7 +146,7 @@ async def test_woocommerce_order_lifecycle_hold_confirm_cancel(client: httpx.Asy
     resp_created = await client.post(
         "/woocommerce/webhooks",
         content=raw_created,
-        headers={"Content-Type": "application/json", "x-wc-webhook-delivery-id": f"del-{uuid.uuid4()}"}
+        headers=make_wc_headers(raw_created, topic="order.created", delivery_id=f"del-{uuid.uuid4()}")
     )
     assert resp_created.status_code == 200
     data_created = resp_created.json()
@@ -156,14 +166,14 @@ async def test_woocommerce_order_lifecycle_hold_confirm_cancel(client: httpx.Asy
     dup_resp_1 = await client.post(
         "/woocommerce/webhooks",
         content=raw_created,
-        headers={"Content-Type": "application/json", "x-wc-webhook-delivery-id": dup_delivery_id}
+        headers=make_wc_headers(raw_created, topic="order.created", delivery_id=dup_delivery_id)
     )
     assert dup_resp_1.status_code == 200
 
     dup_resp_2 = await client.post(
         "/woocommerce/webhooks",
         content=raw_created,
-        headers={"Content-Type": "application/json", "x-wc-webhook-delivery-id": dup_delivery_id}
+        headers=make_wc_headers(raw_created, topic="order.created", delivery_id=dup_delivery_id)
     )
     assert dup_resp_2.status_code == 200
     assert dup_resp_2.json()["status"] == "DUPLICATE_DELIVERY_ACKNOWLEDGED"
@@ -180,10 +190,11 @@ async def test_woocommerce_order_lifecycle_hold_confirm_cancel(client: httpx.Asy
             {"id": line_item_id, "product_id": wc_pid, "quantity": 2}
         ]
     }
+    raw_paid = json.dumps(paid_payload).encode("utf-8")
     resp_paid = await client.post(
         "/woocommerce/webhooks",
-        content=json.dumps(paid_payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-wc-webhook-delivery-id": f"del-paid-{uuid.uuid4()}"}
+        content=raw_paid,
+        headers=make_wc_headers(raw_paid, topic="order.updated", delivery_id=f"del-paid-{uuid.uuid4()}")
     )
     assert resp_paid.status_code == 200
     paid_outcomes = resp_paid.json()["outcomes"]
@@ -213,10 +224,11 @@ async def test_woocommerce_order_cancellation_releases_stock(client: httpx.Async
         "status": "pending",
         "line_items": [{"id": 1, "product_id": wc_pid, "quantity": 4}]
     }
+    raw_hold = json.dumps(hold_payload).encode("utf-8")
     await client.post(
         "/woocommerce/webhooks",
-        content=json.dumps(hold_payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
+        content=raw_hold,
+        headers=make_wc_headers(raw_hold, topic="order.created")
     )
 
     # Stock should be 6
@@ -228,10 +240,11 @@ async def test_woocommerce_order_cancellation_releases_stock(client: httpx.Async
         "status": "cancelled",
         "line_items": [{"id": 1, "product_id": wc_pid, "quantity": 4}]
     }
+    raw_cancel = json.dumps(cancel_payload).encode("utf-8")
     cancel_resp = await client.post(
         "/woocommerce/webhooks",
-        content=json.dumps(cancel_payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
+        content=raw_cancel,
+        headers=make_wc_headers(raw_cancel, topic="order.updated")
     )
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["outcomes"][0]["status"] == "CANCELLED"
@@ -325,8 +338,9 @@ async def test_mandatory_100_concurrent_woocommerce_orders_on_10_units(client: h
     tasks = []
 
     # 3. Dispatch 100 concurrent checkout order requests simultaneously
+    batch_id = int(str(uuid.uuid4().int)[:5])
     for i in range(total_shoppers):
-        order_id = 100000 + i
+        order_id = batch_id * 1000 + i
         order_payload = {
             "id": order_id,
             "status": "pending",
@@ -335,14 +349,11 @@ async def test_mandatory_100_concurrent_woocommerce_orders_on_10_units(client: h
             ]
         }
         delivery_id = f"wc-contention-del-{i}-{uuid.uuid4().hex[:4]}"
+        raw_order = json.dumps(order_payload).encode("utf-8")
         tasks.append(client.post(
             "/woocommerce/webhooks",
-            content=json.dumps(order_payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "x-wc-webhook-topic": "order.created",
-                "x-wc-webhook-delivery-id": delivery_id
-            }
+            content=raw_order,
+            headers=make_wc_headers(raw_order, topic="order.created", delivery_id=delivery_id)
         ))
 
     responses = await asyncio.gather(*tasks)

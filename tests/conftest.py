@@ -18,6 +18,7 @@ async def init_test_env():
     await connect_redis()
     await ensure_indexes(db)
     yield
+    await close_redis()
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:

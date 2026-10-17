@@ -29,7 +29,11 @@ async def health_check() -> Dict[str, Any]:
         r = await redis_manager.connect()
         await r.ping()
         redis_status = "UP"
-        details["redis_uri"] = settings.REDIS_URI
+        if "@" in settings.REDIS_URI:
+            sanitized_host = settings.REDIS_URI.split("@")[-1]
+            details["redis_uri"] = f"redis://***@{sanitized_host}"
+        else:
+            details["redis_uri"] = settings.REDIS_URI
     except Exception as e:
         details["redis_error"] = str(e)
 

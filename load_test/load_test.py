@@ -9,8 +9,24 @@ import time
 import argparse
 import uuid
 import httpx
-from typing import List, Dict, Any
+import hmac
+import hashlib
+import base64
+import json
+import os
+from typing import List, Dict, Any, Optional
 import statistics
+
+def generate_wc_signature(payload_bytes: bytes, secret: str) -> str:
+    digest = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+def get_default_webhook_secret() -> str:
+    try:
+        from backend.config import settings
+        return settings.WC_WEBHOOK_SECRET or ""
+    except Exception:
+        return os.getenv("WC_WEBHOOK_SECRET", "")
 
 async def run_load_test(
     base_url: str,
@@ -20,8 +36,10 @@ async def run_load_test(
     concurrency_limit: int,
     hold_ttl: int,
     confirm_percentage: float = 0.5,
-    mode: str = "direct"
+    mode: str = "direct",
+    webhook_secret: Optional[str] = None
 ) -> Dict[str, Any]:
+    secret = webhook_secret if webhook_secret is not None else get_default_webhook_secret()
     print("\n" + "="*70)
     print("CONCORD HIGH-CONTENTION LOAD TEST HARNESS")
     print("="*70)
@@ -35,9 +53,11 @@ async def run_load_test(
     print(f"Auto-Confirm Ratio   : {int(confirm_percentage * 100)}%")
     print("="*70 + "\n")
 
+    limits = httpx.Limits(max_connections=200, max_keepalive_connections=50, keepalive_expiry=30.0)
     async with httpx.AsyncClient(
         base_url=base_url,
         timeout=30.0,
+        limits=limits,
         headers={"ngrok-skip-browser-warning": "true"}
     ) as client:
         # Step 1: Health check
@@ -95,13 +115,18 @@ async def run_load_test(
                                 {"id": client_idx + 1, "product_id": wc_product_id, "quantity": requested_quantity}
                             ]
                         }
+                        raw_wc = json.dumps(wc_payload).encode("utf-8")
+                        headers = {
+                            "Content-Type": "application/json",
+                            "x-wc-webhook-topic": "order.created",
+                            "x-wc-webhook-delivery-id": f"wc-bench-del-{order_id}"
+                        }
+                        if secret:
+                            headers["x-wc-webhook-signature"] = generate_wc_signature(raw_wc, secret)
                         resp = await client.post(
                             "/woocommerce/webhooks",
-                            json=wc_payload,
-                            headers={
-                                "x-wc-webhook-topic": "order.created",
-                                "x-wc-webhook-delivery-id": f"wc-bench-del-{order_id}"
-                            }
+                            content=raw_wc,
+                            headers=headers
                         )
                         elapsed_ms = (time.perf_counter() - t0) * 1000
                         latencies.append(elapsed_ms)
@@ -150,14 +175,23 @@ async def run_load_test(
         to_confirm = int(len(successful_bookings) * confirm_percentage)
         for b in successful_bookings[:to_confirm]:
             if mode == "woocommerce":
+                conf_payload = {
+                    "id": b["order_id"],
+                    "status": "processing",
+                    "line_items": [{"id": 1, "product_id": wc_product_id, "quantity": requested_quantity}]
+                }
+                raw_conf = json.dumps(conf_payload).encode("utf-8")
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-wc-webhook-topic": "order.updated",
+                    "x-wc-webhook-delivery-id": f"wc-conf-del-{b['order_id']}"
+                }
+                if secret:
+                    headers["x-wc-webhook-signature"] = generate_wc_signature(raw_conf, secret)
                 c_resp = await client.post(
                     "/woocommerce/webhooks",
-                    json={
-                        "id": b["order_id"],
-                        "status": "processing",
-                        "line_items": [{"id": 1, "product_id": wc_product_id, "quantity": requested_quantity}]
-                    },
-                    headers={"x-wc-webhook-topic": "order.updated", "x-wc-webhook-delivery-id": f"wc-conf-del-{b['order_id']}"}
+                    content=raw_conf,
+                    headers=headers
                 )
                 if c_resp.status_code == 200:
                     confirmed_count += 1
@@ -172,11 +206,17 @@ async def run_load_test(
         active_holds = final_prod["active_holds"]
         confirmed_units = final_prod["confirmed_units"]
 
-        # Teardown product
+        # Teardown product and mapping
         try:
             # cancel remaining holds to allow deletion
             for b in successful_bookings[to_confirm:]:
                 await client.post(f"/reservations/{b['booking_id']}/cancel")
+            if mode == "woocommerce":
+                maps_resp = await client.get("/woocommerce/mappings")
+                if maps_resp.status_code == 200:
+                    for m in maps_resp.json():
+                        if m.get("concord_product_id") == product_id:
+                            await client.delete(f"/woocommerce/mappings/{m['id']}")
             await client.delete(f"/products/{product_id}")
         except Exception:
             pass

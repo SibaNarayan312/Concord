@@ -1,4 +1,6 @@
+import asyncio
 import redis.asyncio as aioredis
+from redis.exceptions import NoScriptError
 from typing import Optional, Dict, Any, Tuple
 from backend.config import settings
 import logging
@@ -176,39 +178,49 @@ return {1, "CONFIRMED", stream_id}
 class RedisClientManager:
     def __init__(self):
         self.client: Optional[aioredis.Redis] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._reserve_sha: Optional[str] = None
         self._release_sha: Optional[str] = None
         self._confirm_sha: Optional[str] = None
 
     async def connect(self) -> aioredis.Redis:
-        if self.client is not None:
-            try:
-                await self.client.ping()
-            except Exception:
-                self.client = None
-                self._reserve_sha = None
-                self._release_sha = None
-                self._confirm_sha = None
+        current_loop = asyncio.get_running_loop()
+        if self.client is not None and self._loop == current_loop:
+            return self.client
 
-        if self.client is None:
-            logger.info(f"Connecting to Redis at {settings.REDIS_URI}...")
-            self.client = aioredis.from_url(
-                settings.REDIS_URI,
-                decode_responses=True,
-                socket_timeout=5.0
-            )
-            await self.client.ping()
-            # Register Lua scripts
-            self._reserve_sha = await self.client.script_load(RESERVE_LUA)
-            self._release_sha = await self.client.script_load(RELEASE_LUA)
-            self._confirm_sha = await self.client.script_load(CONFIRM_LUA)
-            logger.info("Redis connected and Lua scripts loaded successfully.")
+        if self.client is not None and self._loop != current_loop:
+            self.client = None
+            self._reserve_sha = None
+            self._release_sha = None
+            self._confirm_sha = None
+
+        logger.info(f"Connecting to Redis at {settings.REDIS_URI}...")
+        self.client = aioredis.from_url(
+            settings.REDIS_URI,
+            decode_responses=True,
+            socket_timeout=10.0,
+            socket_connect_timeout=10.0,
+            max_connections=200
+        )
+        self._loop = current_loop
+        # Register Lua scripts
+        self._reserve_sha = await self.client.script_load(RESERVE_LUA)
+        self._release_sha = await self.client.script_load(RELEASE_LUA)
+        self._confirm_sha = await self.client.script_load(CONFIRM_LUA)
+        logger.info("Redis connected and Lua scripts loaded successfully.")
         return self.client
 
     async def close(self):
         if self.client is not None:
-            await self.client.aclose()
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
             self.client = None
+            self._loop = None
+            self._reserve_sha = None
+            self._release_sha = None
+            self._confirm_sha = None
             logger.info("Redis connection closed.")
 
     async def execute_reserve(
@@ -224,7 +236,7 @@ class RedisClientManager:
         args = [product_id, booking_id, quantity, ttl_seconds, timestamp, settings.STREAM_MAX_LEN]
         try:
             res = await r.evalsha(self._reserve_sha, len(keys), *keys, *args)
-        except aioredis.NoScriptError:
+        except NoScriptError:
             self._reserve_sha = await r.script_load(RESERVE_LUA)
             res = await r.evalsha(self._reserve_sha, len(keys), *keys, *args)
 
@@ -246,7 +258,7 @@ class RedisClientManager:
         args = [reason, timestamp, settings.STREAM_MAX_LEN, booking_id]
         try:
             res = await r.evalsha(self._release_sha, len(keys), *keys, *args)
-        except aioredis.NoScriptError:
+        except NoScriptError:
             self._release_sha = await r.script_load(RELEASE_LUA)
             res = await r.evalsha(self._release_sha, len(keys), *keys, *args)
 
@@ -266,7 +278,7 @@ class RedisClientManager:
         args = [timestamp, settings.STREAM_MAX_LEN, booking_id]
         try:
             res = await r.evalsha(self._confirm_sha, len(keys), *keys, *args)
-        except aioredis.NoScriptError:
+        except NoScriptError:
             self._confirm_sha = await r.script_load(CONFIRM_LUA)
             res = await r.evalsha(self._confirm_sha, len(keys), *keys, *args)
 

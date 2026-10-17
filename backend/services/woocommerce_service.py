@@ -223,6 +223,16 @@ class WooCommerceService:
         webhooks_coll = get_wc_webhooks_collection()
         orders_coll = get_wc_orders_collection()
 
+        # Handle WooCommerce webhook verification ping
+        if "ping" in topic.lower() or ("webhook_id" in payload and not payload.get("id")):
+            webhook_id = payload.get("webhook_id", "ping")
+            logger.info(f"WooCommerce webhook ping received (webhook_id={webhook_id}).")
+            return {
+                "status": "SUCCESS",
+                "message": "Webhook ping acknowledged.",
+                "webhook_id": webhook_id
+            }
+
         order_id = payload.get("id")
         if not order_id:
             raise HTTPException(status_code=400, detail="Missing order 'id' in WooCommerce webhook payload.")
@@ -529,6 +539,18 @@ class WooCommerceService:
 
         wc_pid = mapping["wc_product_id"]
         wc_var_id = mapping.get("wc_variation_id", 0)
+
+        # Guard: Check mapping-level sync_enabled flag
+        if not mapping.get("sync_enabled", True):
+            return WooCommerceSyncResult(
+                wc_product_id=wc_pid,
+                wc_variation_id=wc_var_id,
+                concord_product_id=concord_product_id,
+                stock_quantity=0,
+                success=False,
+                message="Stock synchronization is disabled for this product mapping.",
+                mode="DISABLED"
+            )
 
         # Retrieve current available stock from Redis
         stock = await redis_manager.get_inventory(concord_product_id)

@@ -106,29 +106,38 @@ Open **`http://localhost:8000`** in any web browser to view the interactive dash
 
 ---
 
+GitHub Repository: [https://github.com/SibaNarayan312/Concord.git](https://github.com/SibaNarayan312/Concord.git)
+
+---
+
 ## Running the Automated Test Suite
 
-Run all 20 unit, integration, concurrency, idempotency, and WooCommerce tests:
+Run all 30 unit, integration, concurrency, idempotency, recovery, and WooCommerce tests:
 ```powershell
 python -m pytest -v tests/
 ```
 
 Test coverage includes:
-- MongoDB CRUD operations and unique name validation.
-- Guarded product deletion blocking active holds.
-- Redis Lua atomic reservation, confirmation, and cancellation.
-- Mandatory 100-client race test on 10 units (asserting zero oversell).
-- Idempotency key deduplication and payload conflict detection (`409 Conflict`).
-- Automatic hold expiration and inventory restitution.
-- Cross-database reconciliation of simulated orphan holds.
-- Redis Streams lifecycle event emission and SSE retrieval.
-- MongoDB aggregation pipeline outputs.
-- WooCommerce product mapping and compound unique constraints.
-- WooCommerce webhook HMAC-SHA256 signature verification.
-- WooCommerce order lifecycle (hold on `pending`, confirm on `processing`, cancel on `cancelled`).
-- WooCommerce bidirectional stock synchronization.
-- Simulated end-to-end checkout.
-- Mandatory 100-concurrent WooCommerce order race test on 10 units.
+- **MongoDB CRUD & Validation**: Catalog management, schema validation, unique product name indexing, and guarded product deletion blocking active holds.
+- **Redis Lua Atomic Coordination**: Zero-oversell enforcement via `reserve.lua`, `release.lua`, and `confirm.lua`.
+- **Mandatory 100-Client Contention Race**: 100 simultaneous requests competing for 10 units (asserting exactly 10 holds, 90 out-of-stock rejections, zero overselling).
+- **Strict Idempotency & Conflict Detection**: SHA-256 fingerprint deduplication returning cached responses and rejecting mutated payloads with `409 Conflict`.
+- **Automated Hold Expiration**: Background worker releasing expired holds and restoring stock without leakage.
+- **Cross-Database Reconciliation**: Self-healing worker repairing simulated orphan holds and incomplete operations.
+- **Redis Streams & SSE Replay**: Real-time lifecycle event publishing and cursor resumption via `Last-Event-ID`.
+- **MongoDB Aggregation Pipelines**: Multi-stage aggregation pipelines for conversion metrics, product performance, and status analytics.
+- **WooCommerce Product ID Mappings**: Compound unique constraints on `wc_product_id` and `wc_variation_id`.
+- **WooCommerce HMAC-SHA256 Webhooks**: Cryptographic signature validation, duplicate delivery deduplication, reachability pings (`deliver_ping`), and order lifecycle FSM (`pending` -> hold, `processing` -> confirm, `cancelled` -> release).
+- **Bidirectional Stock Sync**: Idempotent stock push using absolute quantities, respecting `sync_enabled` flags.
+- **Mandatory 100-Concurrent WooCommerce Webhook Race**: 100 simultaneous order webhook requests competing for 10 units (asserting exactly 10 holds, 90 rejections, zero oversell).
+
+---
+
+## Demo Limitations & Scope Disclosures
+
+- **Browser Automation in Sandboxes**: The browser automation subagent cannot auto-download the Playwright binary due to external Microsoft/Azure CDN access restrictions in sandboxed evaluation environments. The dashboard UI at `http://localhost:8000/` was tested and verified via live ASGI client requests and direct browser access.
+- **Cluster Topology**: Current development runs single-node MongoDB 7.0 and Redis 7.2 containers in Docker Compose, suitable for local evaluation and demonstration. Multi-region cluster failover is reserved for enterprise scale-out.
+- **Temporary WooCommerce Test Store**: The previously connected WooCommerce store (`https://poorglue.s3-tastewp.com`) was provisioned on TasteWP for empirical integration testing. As TasteWP instances expire after 48 hours, Concord includes an internal Mock Mode (`WC_MOCK_MODE=true`) and complete end-to-end webhook test suites that operate independently of external store availability.
 
 ---
 
